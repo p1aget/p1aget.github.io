@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Raw Traffic Monitor</title>
+    <style>
+        /* GitHub Raw Dark Theme Styling */
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            background-color: #0d1117; /* GitHub Dark background */
+            color: #c9d1d9;            /* Light grey / white monospace text */
+            font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+            font-size: 14px;
+            line-height: 1.5;
+            margin: 0;
+            padding: 16px;
+            overflow-x: hidden;
+        }
+
+        /* Pure raw text container */
+        #raw-output {
+            white-space: pre-wrap;
+            word-break: break-all;
+            display: block;
+            margin-bottom: 20px;
+        }
+
+        /* Divider line in Raw style */
+        .section-divider {
+            color: #30363d;
+            margin: 16px 0;
+            white-space: pre;
+        }
+
+        /* Canvas Chart Container */
+        .chart-container {
+            width: 100%;
+            max-width: 900px;
+            margin-top: 10px;
+        }
+
+        /* Canvas styling to align with raw developer terminal feel */
+        canvas {
+            display: block;
+            width: 100%;
+            height: 220px;
+            background-color: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 4px;
+        }
+
+        .chart-legend {
+            margin-top: 8px;
+            font-size: 12px;
+            color: #8b949e;
+            display: flex;
+            gap: 16px;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .legend-color {
+            width: 12px;
+            height: 3px;
+            display: inline-block;
+            border-radius: 2px;
+        }
+
+        /* Selection styling */
+        ::selection {
+            background-color: #1f6feb;
+            color: #ffffff;
+        }
+    </style>
+</head>
+<body>
+    <!-- Real-time Text Output -->
+    <span id="raw-output">트래픽 데이터를 불러오는 중...</span>
+
+    <!-- Graph Section -->
+    <div class="chart-container">
+        <div style="margin-bottom: 6px; color: #8b949e; font-size: 13px;">[실시간 초당 트래픽 히스토리 그래프]</div>
+        <canvas id="trafficChart"></canvas>
+        <div class="chart-legend">
+            <div class="legend-item">
+                <span class="legend-color" style="background-color: #58a6ff;"></span>
+                <span>RPS (요청/초)</span>
+            </div>
+            <div class="legend-item">
+                <span class="legend-color" style="background-color: #3fb950;"></span>
+                <span>네트워크 처리량 (Mbps)</span>
+            </div>
+        </div>
+    </div>
+
+<script>
+    // Traffic metrics state
+    let requestsInCurrentSecond = 0;
+    let currentRps = 0;
+    let simulatedMbps = 0;
+
+    // History data buffer for live chart (max 60 seconds)
+    const MAX_HISTORY = 60;
+    const rpsHistory = new Array(MAX_HISTORY).fill(0);
+    const mbpsHistory = new Array(MAX_HISTORY).fill(0);
+
+    // Call this function whenever an actual request is received
+    function trackRequest() {
+        requestsInCurrentSecond++;
+    }
+
+    // Canvas element setup
+    const canvas = document.getElementById('trafficChart');
+    const ctx = canvas.getContext('2d');
+
+    // Handle high-DPI crisp canvas rendering
+    function resizeCanvas() {
+        const rect = canvas.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = rect.width * dpr;
+        canvas.height = rect.height * dpr;
+        ctx.scale(dpr, dpr);
+    }
+
+    window.addEventListener('resize', () => {
+        resizeCanvas();
+        drawChart();
+    });
+
+    // Render smooth live line chart using HTML5 Canvas API
+    function drawChart() {
+        const rect = canvas.getBoundingClientRect();
+        const width = rect.width;
+        const height = rect.height;
+
+        // Clear canvas
+        ctx.clearRect(0, 0, width, height);
+
+        // Find max dynamic scale for Y-axis
+        const maxVal = Math.max(
+            10,
+            ...rpsHistory,
+            ...mbpsHistory
+        ) * 1.2;
+
+        const padding = { top: 20, right: 15, bottom: 25, left: 40 };
+        const graphWidth = width - padding.left - padding.right;
+        const graphHeight = height - padding.top - padding.bottom;
+
+        // 1. Draw Background Grid Lines
+        ctx.strokeStyle = '#21262d';
+        ctx.lineWidth = 1;
+        ctx.setFont = '10px monospace';
+        ctx.fillStyle = '#484f58';
+
+        const gridSteps = 4;
+        for (let i = 0; i <= gridSteps; i++) {
+            const y = padding.top + (graphHeight / gridSteps) * i;
+            const val = Math.round(maxVal - (maxVal / gridSteps) * i);
+
+            // Grid Line
+            ctx.beginPath();
+            ctx.moveTo(padding.left, y);
+            ctx.lineTo(width - padding.right, y);
+            ctx.stroke();
+
+            // Y-Axis Value Label
+            ctx.fillText(val.toString(), 8, y + 3);
+        }
+
+        // 2. Helper to draw dataset line & gradient fill
+        function drawSeries(data, lineColor, fillColor) {
+            if (data.length < 2) return;
+
+            const stepX = graphWidth / (MAX_HISTORY - 1);
+
+            // Create Path
+            ctx.beginPath();
+            for (let i = 0; i < data.length; i++) {
+                const x = padding.left + i * stepX;
+                const normalizedY = (data[i] / maxVal);
+                const y = padding.top + graphHeight * (1 - normalizedY);
+
+                if (i === 0) {
+                    ctx.moveTo(x, y);
+                } else {
+                    ctx.lineTo(x, y);
+                }
+            }
+
+            // Stroke line
+            ctx.strokeStyle = lineColor;
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            // Area Fill
+            const lastX = padding.left + (data.length - 1) * stepX;
+            const bottomY = padding.top + graphHeight;
+            ctx.lineTo(lastX, bottomY);
+            ctx.lineTo(padding.left, bottomY);
+            ctx.closePath();
+
+            const gradient = ctx.createLinearGradient(0, padding.top, 0, bottomY);
+            gradient.addColorStop(0, fillColor);
+            gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+            ctx.fillStyle = gradient;
+            ctx.fill();
+        }
+
+        // Render Series 1: Mbps (Green)
+        drawSeries(mbpsHistory, '#3fb950', 'rgba(63, 185, 80, 0.15)');
+
+        // Render Series 2: RPS (Blue)
+        drawSeries(rpsHistory, '#58a6ff', 'rgba(88, 166, 255, 0.2)');
+    }
+
+    // Main 1-second interval loop
+    setInterval(() => {
+        // Calculate RPS
+        currentRps = requestsInCurrentSecond;
+        requestsInCurrentSecond = 0;
+
+        // Simulated throughput based on current RPS
+        simulatedMbps = parseFloat((Math.random() * 15 + (currentRps * 0.8)).toFixed(2));
+
+        // Push new metrics to history buffers
+        rpsHistory.shift();
+        rpsHistory.push(currentRps);
+
+        mbpsHistory.shift();
+        mbpsHistory.push(simulatedMbps);
+
+        // Current Timestamp (ISO format)
+        const timestamp = new Date().toISOString();
+
+        // Updated Raw formatted Korean text output
+        const rawText = `[${timestamp}] 트래픽 상태: 온라인
+--------------------------------------------------
+현재 RPS(요청/초): ${currentRps} 요청/초
+네트워크 처리량: ${simulatedMbps}Mbps
+상태: 정상`;
+
+        document.getElementById('raw-output').textContent = rawText;
+
+        // Redraw live graph
+        drawChart();
+
+    }, 1000);
+
+</script>
+</body>
+</html>
